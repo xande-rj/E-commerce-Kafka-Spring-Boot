@@ -83,4 +83,7 @@ public class OutboxEvent {
     public LocalDateTime getPublishedAt() {
         return publishedAt;
     }
+    public void marcarComoPublicado() {
+        this.publishedAt = LocalDateTime.now();
+    }
 }
