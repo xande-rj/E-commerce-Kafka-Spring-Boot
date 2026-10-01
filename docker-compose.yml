@@ -12,6 +12,19 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  pagamento-postgres:
+    image: postgres:16
+    container_name: pagamento-ecommerce-postgres
+    environment:
+      POSTGRES_DB: pagamentos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - pagamento_postgres_data:/var/lib/postgresql/data
+
+
   kafka:
     image: apache/kafka:4.0.1
     container_name: ecommerce-kafka
@@ -35,4 +48,5 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
 volumes:
+  pagamento_postgres_data:
   postgres_data:

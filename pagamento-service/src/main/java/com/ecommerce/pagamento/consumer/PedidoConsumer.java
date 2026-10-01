@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
 @Component
@@ -25,20 +26,23 @@ public class PedidoConsumer {
             groupId = "pagamento-group"
     )
     public void consumir(ConsumerRecord<String, String> record) {
-        PedidoCriadoEvent pedido = jsonMapper.readValue(
-                record.value(),
-                PedidoCriadoEvent.class
-        );
-        log.info(
-                "PEDIDO_RECEBIDO eventId={} pedidoId={}"+
-                        "topic={} partition={} offfset={}",
-                pedido.eventId(),
-                pedido.pedidoId(),
-                record.topic(),
-                record.partition(),
-                record.offset()
-        );
-        pagamentoService.publicar(pedido);
+        try{
+            PedidoCriadoEvent pedido = jsonMapper.readValue(record.value(), PedidoCriadoEvent.class);
+            log.info(
+                    "PEDIDO_RECEBIDO eventId={} pedidoId={}"+
+                            "topic={} partition={} offfset={}",
+                    pedido.eventId(),
+                    pedido.pedidoId(),
+                    record.topic(),
+                    record.partition(),
+                    record.offset()
+            );
+            pagamentoService.publicar(pedido);
+        }catch (JacksonException e){
+            throw new IllegalArgumentException("Não  foi possivel interpretar Pedido"+ e);
+        }
+
+
 
     }
 }

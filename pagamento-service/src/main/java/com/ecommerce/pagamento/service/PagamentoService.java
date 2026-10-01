@@ -1,41 +1,103 @@
 package com.ecommerce.pagamento.service;
 
+import com.ecommerce.pagamento.enums.StatusPagamento;
 import com.ecommerce.pagamento.event.PagamentoEvent;
 import com.ecommerce.pagamento.event.PedidoCriadoEvent;
-import com.ecommerce.pagamento.producer.PagamentoProducer;
+import com.ecommerce.pagamento.model.OutboxEvent;
+import com.ecommerce.pagamento.model.Pagamento;
+import com.ecommerce.pagamento.repository.EventoProcessadoRepository;
+import com.ecommerce.pagamento.repository.OutboxEventRepository;
+import com.ecommerce.pagamento.repository.PagamentoRepository;
+import jakarta.transaction.Transactional;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class PagamentoService {
 
     private static final BigDecimal LIMITE_SIMULADO = new BigDecimal("1000.00");
-    private final PagamentoProducer pagamentoProducer;
 
-    public PagamentoService(PagamentoProducer pagamentoProducer) {
-        this.pagamentoProducer = pagamentoProducer;
+    private final EventoProcessadoRepository eventoProcessadoRepository;
+    private final PagamentoRepository pagamentoRepository;
+    private final OutboxEventRepository outboxEventRepository;
+    private final JsonMapper jsonMapper;
+
+    public PagamentoService(EventoProcessadoRepository eventoProcessadoRepository,
+                            PagamentoRepository pagamentoRepository,
+                            OutboxEventRepository outboxEventRepository,
+                            JsonMapper jsonMapper) {
+
+        this.eventoProcessadoRepository = eventoProcessadoRepository;
+        this.pagamentoRepository = pagamentoRepository;
+        this.outboxEventRepository = outboxEventRepository;
+        this.jsonMapper = jsonMapper;
     }
 
-    public void publicar(PedidoCriadoEvent pedido){
-        boolean aprovado = pedido.valor().compareTo(LIMITE_SIMULADO) <= 0;
+    @Transactional
+    public void publicar(PedidoCriadoEvent pedido) {
 
-        String tipo = aprovado ? "PAGAMENTO_APROVADO" : "PAGAMENTO_RECUSADO";
+        int registrado =
+                this.eventoProcessadoRepository.registraSeNovo(pedido.eventId());
 
-        String motivo = aprovado?null:"Limite de Pagamento Simulado excedido";
+        if (registrado == 0) {
+            log.info("EVENTO_DUPLICADO eventId={} pedido={}"
+                    , pedido.eventId(), pedido);
+            return;
+        }
 
-        String eventId = UUID.nameUUIDFromBytes(("pagamento:"+pedido.eventId()).getBytes()).toString();
+        boolean aprovado =
+                pedido.valor().compareTo(LIMITE_SIMULADO) <= 0;
+
+        StatusPagamento status =
+                aprovado ? StatusPagamento.APROVADO :
+                        StatusPagamento.RECUSADO;
+
+        String motivo =
+                aprovado ? null :
+                        "Limite de Pagamento Simulado excedido";
+
+        Pagamento pagamento=new Pagamento(
+                pedido.pedidoId(),
+                pedido.eventId(),
+                pedido.valor(),
+                status,
+                motivo
+        );
+        pagamentoRepository.save(pagamento);
 
         PagamentoEvent evento = new PagamentoEvent(
-                eventId,
+                UUID.randomUUID().toString(),
                 pedido.pedidoId(),
-                tipo,
+                aprovado?"Pagamento_APROVADO":
+                        "Pagamento_RECUSADO",
                 pedido.valor(),
                 motivo
         );
 
-        pagamentoProducer.publicar(evento);
+try{
+    String payload = jsonMapper.writeValueAsString(evento);
+
+    OutboxEvent outbox = new OutboxEvent(
+            evento.eventId(),
+            pedido.pedidoId().toString(),
+            evento.tipo(),
+            "pagamento",
+            payload
+    );
+    outboxEventRepository.save(outbox);
+
+}catch (JacksonException e){
+    throw new IllegalStateException("Erro ao serializar evento"+e);
+}
+        log.info("PAGAMENTO_PROCESSADO pedidoId={} status={}",
+                pedido.pedidoId(), status);
+
 
     }
 }
